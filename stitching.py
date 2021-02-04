@@ -2,8 +2,11 @@ import cv2
 import numpy as np
 import argparse
 
-def getImage(path):
+def getGrayscaleImage(path):
     return cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+
+def getColorImage(path):
+    return cv2.imread(path)
 
 def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
@@ -64,16 +67,19 @@ def stitchImages(matches, keypoints1, keypoints2, img1, img2):
 
 
 def main(path1, path2, feature_extraction_method, matcher_method, k_val, ratio):
-    img1 = getImage(path1)
-    img2 = getImage(path2)
+    img1_color = getColorImage(path1)
+    img2_color = getColorImage(path2)
 
-    (keypoints1, descriptors1) = getKeypointsAndDescriptors(img1, feature_extraction_method)
-    (keypoints2, descriptors2) = getKeypointsAndDescriptors(img2, feature_extraction_method)
+    img1_gray = getGrayscaleImage(path1)
+    img2_gray = getGrayscaleImage(path2)
+
+    (keypoints1, descriptors1) = getKeypointsAndDescriptors(img1_gray, feature_extraction_method)
+    (keypoints2, descriptors2) = getKeypointsAndDescriptors(img2_gray, feature_extraction_method)
 
     matcher = createMatcher(matcher_method, feature_extraction_method)
 
-    matches = matchFeatures(matcher, img1, img2, keypoints1, descriptors1, keypoints2, descriptors2, k_val, ratio)
-    stitchImages(matches, keypoints1, keypoints2, img1, img2)
+    matches = matchFeatures(matcher, img1_gray, img2_gray, keypoints1, descriptors1, keypoints2, descriptors2, k_val, ratio)
+    stitchImages(matches, keypoints1, keypoints2, img1_color, img2_color)
 
 
 if __name__ == '__main__':
