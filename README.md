@@ -1,12 +1,14 @@
 The arguments for stitching.py are as follows:
---image1 = path to image 1
---image2 = path to image 2
---fmethod = feature extraction method
---mmethod = feature matching method
---k = value of k for kNN matcher
---ratio = ratio to tune which matches should be considered 'good'
+
+1. --image1 = path to image 1
+2. --image2 = path to image 2
+3. --fmethod = feature extraction method
+4. --mmethod = feature matching method
+5. --k = value of k for kNN matcher
+6. --ratio = ratio to tune which matches should be considered 'good'
 
 sample command to run:
+
 python3 stitching.py --image1 ./img1.png --image2 ./img2.png --fmethod sift --mmethod bruteforce --k 2 --ratio 0.75
 
 TODO:
