@@ -29,49 +29,26 @@ def createMatcher(matcher_method, feature_extraction_method):
 def matchFeatures(matcher, img1, img2, keypoints1, descriptors1, keypoints2, descriptors2, k_val, ratio):
     matches = matcher.knnMatch(descriptors2, descriptors1, k=k_val)
     good_matches = []
-    #good_matches_for_draw = []
     for m,n in matches:
         if m.distance < ratio*n.distance:
             good_matches.append(m)
-            #good_matches_for_draw.append([m])
-
-    #image_with_matches = cv2.drawMatchesKnn(img2, keypoints2, img1, keypoints1, good_matches_for_draw, None, flags = 2)
-    #cv2.imshow("Image with Good Matches", image_with_matches)
-    #cv2.waitKey(0)
-    #cv2.destroyAllWindows()
 
     return good_matches
 
 # isToTheLeft counts the number of matches on the left side of image 1 and the number of matches
 # on the right side of image 2. Then, it calculates the ratio of these matches to the total number
 # of matches and returns this value. 
-def isToTheLeft(matches, keypoints1, keypoints2, img1, img2): #img1width, img2width):
+def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
     src_pts = np.float32([ keypoints2[m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
     dst_pts = np.float32([ keypoints1[m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
 
-    test1 = img1
-    test2 = img2
-    for point in src_pts:
-        cv2.circle(test1, (point[0][0],point[0][1]), radius=20, color=(0, 0, 255), thickness=5)
-
-    cv2.imshow("Test1", test1)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-    for point in dst_pts:
-        cv2.circle(test2, (point[0][0],point[0][1]), radius=20, color=(0, 0, 255), thickness=5)
-
-    cv2.imshow("Test2", test2)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
     num_points_for_left = 0
     for point in src_pts:
-        if point[0][0] > (img2.shape[1]/2): #(img2width / 2):
+        if point[0][0] > (img2width / 2):
             num_points_for_left = num_points_for_left + 1
 
     for point in dst_pts:
-        if point[0][0] < (img1.shape[1]/2): #(img1width / 2):
+        if point[0][0] < (img1width / 2):
             num_points_for_left = num_points_for_left + 1
 
     ratio_points_for_left = num_points_for_left / (len(src_pts) + len(dst_pts))
@@ -113,13 +90,6 @@ def stitchMultImages(matcher, img_gray, img_keypoints, img_descriptors, k_val, r
     # the image with the second highest matches that is the lowest out of all the second highest 
     # matches for all the other images, is most likely to be an edge image. This has been tested 
     # on multiple sets of images sent in random orders. 
-
-
-    # REMOVE
-    for i in range(len(img_gray)):
-        for j in range(len(img_gray)):
-            print(num_match_matrix[i][j])
-        print("\n")
      
     edge_img_second_max = max(num_match_matrix[0])
     edge_img_num = 0
@@ -129,8 +99,6 @@ def stitchMultImages(matcher, img_gray, img_keypoints, img_descriptors, k_val, r
         if second_max < edge_img_second_max:
             edge_img_second_max = second_max
             edge_img_num = i
-
-    print("EDGE IMG: ", edge_img_num)
 
     # start with the edge image and find the image that it matches best with and append it to the 
     # list for now. Then move on to that image and find the next image it matches best with. Continue
@@ -144,32 +112,22 @@ def stitchMultImages(matcher, img_gray, img_keypoints, img_descriptors, k_val, r
         max_matches = max(included_matches)
         adjacent_img_num = num_match_matrix[i].index(max_matches)
 
-        print("-------------------")    
-        print("ORDER: ", final_order)
-        print("current_img: ", i)
-        print("adj img: ", adjacent_img_num)
-
         # The isToTheLeft function returns the ratio of matches that indicate that the adjacent image is
         # to the left of image i
         if i < adjacent_img_num:
-            ratios_for_left = ratios_for_left + isToTheLeft(match_matrix[i][adjacent_img_num], img_keypoints[i], img_keypoints[adjacent_img_num], img_gray[i], img_gray[adjacent_img_num])
-            print(isToTheLeft(match_matrix[i][adjacent_img_num], img_keypoints[i], img_keypoints[adjacent_img_num], img_gray[i], img_gray[adjacent_img_num]))
+            ratios_for_left = ratios_for_left + isToTheLeft(match_matrix[i][adjacent_img_num], img_keypoints[i], img_keypoints[adjacent_img_num], img_gray[i].shape[1], img_gray[adjacent_img_num].shape[1])
         else:
-            ratios_for_left = ratios_for_left + (1 - isToTheLeft(match_matrix[adjacent_img_num][i], img_keypoints[adjacent_img_num], img_keypoints[i], img_gray[adjacent_img_num], img_gray[i]))
-            print(1 - isToTheLeft(match_matrix[adjacent_img_num][i], img_keypoints[adjacent_img_num], img_keypoints[i], img_gray[adjacent_img_num], img_gray[i]))
+            ratios_for_left = ratios_for_left + (1 - isToTheLeft(match_matrix[adjacent_img_num][i], img_keypoints[adjacent_img_num], img_keypoints[i], img_gray[adjacent_img_num].shape[1], img_gray[i].shape[1]))
 
         final_order.append(adjacent_img_num)
 
         if len(final_order) == len(img_gray):
-            print("INITIAL ORDER: ", final_order)
             break
 
         i = adjacent_img_num
     
     # if overall, the location matches indicate that the adjacent images should be to the left 
     # of the starting edge image, the order is reversed.
-    print(ratios_for_left)
-    print(ratios_for_left / (len(img_gray) - 1))
     if (ratios_for_left / (len(img_gray) - 1)) > 0.5:
         final_order.reverse()
 
