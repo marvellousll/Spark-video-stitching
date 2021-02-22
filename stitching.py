@@ -52,7 +52,7 @@ def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
             num_points_for_left = num_points_for_left + 1
 
     ratio_points_for_left = num_points_for_left / (len(src_pts) + len(dst_pts))
-    return ratio_points_for_left
+    return ratio_points_for_left > 0.5
 
 
 def stitchTwoImages(matches, keypoints1, keypoints2, img1, img2):
@@ -69,17 +69,15 @@ def stitchTwoImages(matches, keypoints1, keypoints2, img1, img2):
     return stitched_img
 
 
-def stitchMultImages(matcher, img_gray, img_keypoints, img_descriptors, k_val, ratio):
-    match_matrix = [[0 for i in range(len(img_gray))] for j in range(len(img_gray))] #stores matches for each pair of images
-    num_match_matrix = [[0 for i in range(len(img_gray))] for j in range(len(img_gray))] #stores number of matches for each pair of images
-    for i,_ in enumerate(img_gray):
-        match_matrix[i][i] = [] 
-        num_match_matrix[i][i] = 0
-        j = i+1
-        while j < len(img_gray):
+def stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio):
+    num_imgs = len(img_gray)
+    match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
+    num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
+    for i in range(num_imgs):
+        j = i + 1
+        while j < num_imgs:
             # get matches for img i and img j
             match_matrix[i][j] = matchFeatures(matcher, img_gray[i], img_gray[j], img_keypoints[i], img_descriptors[i], img_keypoints[j], img_descriptors[j], k_val, ratio)
-            match_matrix[j][i] = [] # no need to waste memory by storing these matches
             num_match_matrix[i][j] = len(match_matrix[i][j])
             num_match_matrix[j][i] = len(match_matrix[i][j])
             j = j + 1
@@ -91,49 +89,75 @@ def stitchMultImages(matcher, img_gray, img_keypoints, img_descriptors, k_val, r
     # matches for all the other images, is most likely to be an edge image. This has been tested 
     # on multiple sets of images sent in random orders. 
      
-    edge_img_second_max = max(num_match_matrix[0])
-    edge_img_num = 0
-    for i in range(len(img_gray)):
+    lowest_second_max = 10000000000000000000 # arbitary large number
+    edge_index = -1
+    neighbors = [] # stores the index of the neighboring images (i.e. images with first and second highest number of matches)
+    for i in range(num_imgs):
         # get second highest matches for the image i
-        second_max = max([x for x in num_match_matrix[i] if x != max(num_match_matrix[i])])
-        if second_max < edge_img_second_max:
-            edge_img_second_max = second_max
-            edge_img_num = i
+        first_max = max(num_match_matrix[i])
+        second_max = max([x for x in num_match_matrix[i] if x != first_max ])
+        neighbors.append([num_match_matrix[i].index(first_max), num_match_matrix[i].index(second_max)])
+        if second_max < lowest_second_max:
+            lowest_second_max = second_max
+            edge_index = i
 
-    # start with the edge image and find the image that it matches best with and append it to the 
-    # list for now. Then move on to that image and find the next image it matches best with. Continue
+    # start with the edge image and find the next image to stitch and append it to the list. 
+    # We find the image by picking one of the two neighbors that has not been added to the list previously.
+    # Then move on to that image and find the next image it matches best with. Continue
     # this till all the images have been added to the list. 
+
     final_order = []
-    final_order.append(edge_img_num)
-    i = edge_img_num
-    ratios_for_left = 0
-    while True:
-        included_matches = [num_match_matrix[i][j] for j,_ in enumerate(num_match_matrix[i]) if j not in final_order]
-        max_matches = max(included_matches)
-        adjacent_img_num = num_match_matrix[i].index(max_matches)
+    neigh_index = neighbors[edge_index][0] # The edge only has one neighbor
+    final_order.append(edge_index)
+    final_order.append(neigh_index)
+    prev = edge_index
+    cur = neigh_index
 
-        # The isToTheLeft function returns the ratio of matches that indicate that the adjacent image is
-        # to the left of image i
-        if i < adjacent_img_num:
-            ratios_for_left = ratios_for_left + isToTheLeft(match_matrix[i][adjacent_img_num], img_keypoints[i], img_keypoints[adjacent_img_num], img_gray[i].shape[1], img_gray[adjacent_img_num].shape[1])
-        else:
-            ratios_for_left = ratios_for_left + (1 - isToTheLeft(match_matrix[adjacent_img_num][i], img_keypoints[adjacent_img_num], img_keypoints[i], img_gray[adjacent_img_num].shape[1], img_gray[i].shape[1]))
+    while len(final_order) != num_imgs:
+        next = neighbors[cur][0] if neighbors[cur][0] != prev else neighbors[cur][1]
+        final_order.append(next)
+        prev = cur
+        cur = next
 
-        final_order.append(adjacent_img_num)
-
-        if len(final_order) == len(img_gray):
-            break
-
-        i = adjacent_img_num
-    
-    # if overall, the location matches indicate that the adjacent images should be to the left 
-    # of the starting edge image, the order is reversed.
-    if (ratios_for_left / (len(img_gray) - 1)) > 0.5:
+    # now we have an ordering from one edge to the other
+    # but we don't know if the ordering is from left to right or from right to left
+    # we can check this by checking if the edge is on the left or right of its neighbor
+    # and reverse the ordering if needed
+    rev_flag = False
+    if edge_index < neigh_index:
+        rev_flag = isToTheLeft(match_matrix[edge_index][neigh_index], img_keypoints[edge_index], img_keypoints[neigh_index], img_gray[edge_index].shape[1], img_gray[neigh_index].shape[1])
+    else:
+        rev_flag = not isToTheLeft(match_matrix[neigh_index][edge_index], img_keypoints[neigh_index], img_keypoints[edge_index], img_gray[neigh_index].shape[1], img_gray[edge_index].shape[1])
+    if rev_flag:
         final_order.reverse()
 
     print(final_order)
-    return final_order
+    homographies = findHomography(match_matrix, img_keypoints)
+    stitchImages(final_order, img_color, homographies)
 
+# return a list of homographies
+# homographies[i] is the homography from img[i+1] to img[i]
+def findHomography(match_matrix, img_keypoints):
+    num_imgs = len(img_keypoints)
+    homographies = []
+    for i in range(num_imgs - 1):
+        src_pts = np.float32([ img_keypoints[i+1][m.queryIdx].pt for m in match_matrix[i][i+1] ]).reshape(-1,1,2)
+        dst_pts = np.float32([ img_keypoints[i][m.trainIdx].pt for m in match_matrix[i][i+1] ]).reshape(-1,1,2)
+        homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+        homographies.append(homography)
+    return homographies
+
+# stitch images given the ordering of images and the homographies between neighboring images
+# the idea is to work from the last image by stitching img[n-1] to img[n-2]
+# and then stitch the stitched image to img[n-3] and so on
+def stitchImages(order, img_color, homographies):
+    num_imgs = len(img_color)
+    stitched_img = img_color[order[-1]]
+    for i in reversed(range(num_imgs - 1)):
+        stitched_img = cv2.warpPerspective(stitched_img, homographies[i], (img_color[i].shape[1] + stitched_img.shape[1], img_color[i].shape[0]))
+        stitched_img[0 : img_color[i].shape[0], 0 : img_color[i].shape[1]] = img_color[i]
+
+    cv2.imwrite('stitched.jpg', stitched_img)
 
 def main(path1, path2, path3, path4, path5, path6, feature_extraction_method, matcher_method, k_val, ratio):
     path_list = [path1, path2, path3, path4, path5, path6]
@@ -149,8 +173,7 @@ def main(path1, path2, path3, path4, path5, path6, feature_extraction_method, ma
         img_descriptors.append(descriptors)
 
     matcher = createMatcher(matcher_method, feature_extraction_method)
-    return stitchMultImages(matcher, img_gray, img_keypoints, img_descriptors, k_val, ratio)
-
+    stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Stitch Two Images Together')
