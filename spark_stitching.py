@@ -6,7 +6,6 @@ import numpy as np
 import argparse
 import sys
 import io
-import copyreg
 
 '''
 sys.argv[1] = folder in which each frame is stored as a sub-folder with 6 images
@@ -16,20 +15,6 @@ sys.argv[4] = k_val
 sys.argv[5] = ratio
 sys.argv[6] = output folder
 '''
-
-def patch_Keypoint_pickiling(self):
-    # See : https://stackoverflow.com/questions/10045363/pickling-cv2-keypoint-causes-picklingerror
-    def _pickle_keypoint(keypoint):
-        return cv2.KeyPoint, (
-            keypoint.pt[0],
-            keypoint.pt[1],
-            keypoint.size,
-            keypoint.angle,
-            keypoint.response,
-            keypoint.octave,
-            keypoint.class_id,
-        )
-    copyreg.pickle(cv2.KeyPoint().__class__, _pickle_keypoint)
 
 def getGrayscaleImage(image):
     name, img = image
@@ -42,7 +27,6 @@ def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
         descriptor = cv2.SIFT_create()
 
-    #patch_Keypoint_pickiling(cv2.KeyPoint)
     (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
     return list([image.tolist(), [x.pt[0] for x in keypoints], [x.pt[1] for x in keypoints], descriptors.tolist()])
 
@@ -106,22 +90,6 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
     num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
     desc = df_frame_key_desc.select("desc").collect()
-    
-    '''
-    print(type(desc))
-    print(len(desc))
-    print("--------")
-    print(type(desc[0]))
-    print(len(desc[0]))
-    print("--------")
-    print(type(desc[0][0]))
-    print(len(desc[0][0]))
-    print("--------")
-    print(type(desc[0][0][0]))
-    print(len(desc[0][0][0]))
-    print("--------")
-    print(type(desc[0][0][0][0]))
-    '''
     
     for i, row_i in enumerate(desc):
         for j, row_j in enumerate(desc):
@@ -222,7 +190,5 @@ if __name__ == '__main__':
     # each value in frame_key_desc is a list with [gray_frame, point 1 of keypoints, point 2 of keypoints, descriptors]
     frame_key_desc = frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).cache()
     df_frame_key_desc = frame_key_desc.toDF(["img", "key1", "key2", "desc"])
-    df_frame_key_desc.printSchema()
-
     matcher = createMatcher(sys.argv[3], sys.argv[2])
     stitchMultImages(matcher, frames, df_frame_key_desc, num_imgs, int(sys.argv[4]), float(sys.argv[5]))
