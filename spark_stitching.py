@@ -100,7 +100,10 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
 
     print(num_match_matrix)
 
-    return #TODO: Continue from here
+    return
+
+    #TODO: Continue from here - maybe create a dataframe with num_match_matrix and loop through 
+    # each row of the dataframe and use max() aggregator to get the second max
 
 
     # Find the image that is most likely to be the edge. This code works on the principle that 
