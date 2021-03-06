@@ -17,9 +17,9 @@ order = [1, 2, 3, 4, 5, 6]
 #     print(final_order == correct_order)
 
 
-stitching.main(path1="./img" + str(imgs[0]) + ".png", \
+stitching.main(path1="./img" + str(imgs[2]) + ".png", \
                                 path2="./img" + str(imgs[1]) + ".png", \
-                                path3="./img" + str(imgs[2]) + ".png", \
+                                path3="./img" + str(imgs[0]) + ".png", \
                                 path4="./img" + str(imgs[3]) + ".png", \
                                 path5="./img" + str(imgs[4]) + ".png", \
                                 path6="./img" + str(imgs[5]) + ".png", \

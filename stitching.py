@@ -132,19 +132,28 @@ def stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptor
         final_order.reverse()
 
     print(final_order)
-    homographies = findHomography(match_matrix, img_keypoints)
+    homographies = findHomography(final_order, match_matrix, img_keypoints)
     stitchImages(final_order, img_color, homographies)
 
 # return a list of homographies
 # homographies[i] is the homography from img[i+1] to img[i]
-def findHomography(match_matrix, img_keypoints):
+def findHomography(order, match_matrix, img_keypoints):
     num_imgs = len(img_keypoints)
     homographies = []
     for i in range(num_imgs - 1):
-        src_pts = np.float32([ img_keypoints[i+1][m.queryIdx].pt for m in match_matrix[i][i+1] ]).reshape(-1,1,2)
-        dst_pts = np.float32([ img_keypoints[i][m.trainIdx].pt for m in match_matrix[i][i+1] ]).reshape(-1,1,2)
-        homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
-        homographies.append(homography)
+        index1 = order[i]
+        index2 = order[i+1]
+
+        if (index1 < index2):
+            src_pts = np.float32([ img_keypoints[index2][m.queryIdx].pt for m in match_matrix[index1][index2] ]).reshape(-1,1,2)
+            dst_pts = np.float32([ img_keypoints[index1][m.trainIdx].pt for m in match_matrix[index1][index2] ]).reshape(-1,1,2)
+            homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            homographies.append(homography)
+        else:
+            src_pts = np.float32([ img_keypoints[index2][m.trainIdx].pt for m in match_matrix[index2][index1] ]).reshape(-1,1,2)
+            dst_pts = np.float32([ img_keypoints[index1][m.queryIdx].pt for m in match_matrix[index2][index1] ]).reshape(-1,1,2)
+            homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            homographies.append(homography)
     return homographies
 
 # stitch images given the ordering of images and the homographies between neighboring images
@@ -154,8 +163,9 @@ def stitchImages(order, img_color, homographies):
     num_imgs = len(img_color)
     stitched_img = img_color[order[-1]]
     for i in reversed(range(num_imgs - 1)):
-        stitched_img = cv2.warpPerspective(stitched_img, homographies[i], (img_color[i].shape[1] + stitched_img.shape[1], img_color[i].shape[0]))
-        stitched_img[0 : img_color[i].shape[0], 0 : img_color[i].shape[1]] = img_color[i]
+        next_img = img_color[order[i]]
+        stitched_img = cv2.warpPerspective(stitched_img, homographies[i], (next_img.shape[1] + stitched_img.shape[1], next_img.shape[0]))
+        stitched_img[0 : next_img.shape[0], 0 : next_img.shape[1]] = next_img
 
     cv2.imwrite('stitched.jpg', stitched_img)
 
@@ -173,7 +183,19 @@ def main(path1, path2, path3, path4, path5, path6, feature_extraction_method, ma
         img_descriptors.append(descriptors)
 
     matcher = createMatcher(matcher_method, feature_extraction_method)
-    stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio)
+    #stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio)
+
+    print(img_keypoints[0][0].pt)
+
+    # img_color = []
+    # img_color.append(getColorImage(path3))
+    # img_color.append(getColorImage(path2))
+    # img_color.append(getColorImage(path1))
+    # img_color.append(getColorImage(path4))
+    # stitcher = cv2.Stitcher_create()
+    # (status, stitched) = stitcher.stitch(img_color)
+    # print(status)
+    # cv2.imwrite('stitched1.jpg', stitched)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Stitch Two Images Together')
