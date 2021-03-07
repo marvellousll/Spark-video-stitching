@@ -1,6 +1,7 @@
 import pandas
 import pyspark
 from pyspark.sql import SparkSession
+from subprocess import call
 from PIL import Image
 import cv2
 import numpy as np
@@ -26,10 +27,9 @@ sys.argv[6] = output folder
 #             images.append(img)
 #     return images
 def getColorImage(image):
-    print(image)
     name, img = image
     image_img = Image.open(io.BytesIO(img))
-    np_img = np.array(image_img)
+    np_img = cv2.cvtColor(np.asarray(image_img),cv2.COLOR_RGB2BGR) 
     return np_img
 
 def getGrayscaleImage(image):
@@ -87,21 +87,6 @@ def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
     ratio_points_for_left = num_points_for_left / (len(src_pts) + len(dst_pts))
     return ratio_points_for_left > 0.5
 
-
-def stitchTwoImages(matches, keypoints1, keypoints2, img1, img2):
-    src_pts = np.float32([ keypoints2[m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
-    dst_pts = np.float32([ keypoints1[m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-    homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
-
-    stitched_img = cv2.warpPerspective(img2, homography, ((img1.shape[1] + img2.shape[1]), img1.shape[0])) 
-    stitched_img[0 : img1.shape[0], 0 : img1.shape[1]] = img1 
-    cv2.imwrite('stitched.jpg', stitched_img)
-    cv2.imshow("Result", stitched_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    return stitched_img
-
-
 def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, ratio):
 
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
@@ -123,11 +108,7 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
 
     print(num_match_matrix)
     print("time6 ", datetime.datetime.now()) 
-
-    #TODO: Continue from here - maybe create a dataframe with num_match_matrix and loop through 
-    # each row of the dataframe and use max() aggregator to get the second max
-
-
+    
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
     # An edge image will only have one image that it matches well with. So, we are assuming that 
@@ -231,17 +212,15 @@ if __name__ == '__main__':
     frames = sc.binaryFiles(sys.argv[1])
      
     frames_color = frames.map(lambda img: getColorImage(img)).collect()
-    
-    print("cwd is")
-    print(os.getcwd())
-    # Image.fromarray(frames_color[0]).save("output.jpg")
-    # frames_gray = frames.map(lambda img: getGrayscaleImage(img))
-    # # each value in frame_key_desc is a list with [gray_frame, x-coordinates of keypoints, y-coordinates of keypoints, descriptors]
-    # print("time2 ", datetime.datetime.now()) 
-    # frame_key_desc = frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).cache()
-    # print("time3 ", datetime.datetime.now()) 
-    # df_frame_key_desc = frame_key_desc.toDF(["img", "keyp", "desc"])
-    # print("time4 ", datetime.datetime.now()) 
+    frames_gray = frames.map(lambda img: getGrayscaleImage(img))
+    # each value in frame_key_desc is a list with [gray_frame, x-coordinates of keypoints, y-coordinates of keypoints, descriptors]
+    print("time2 ", datetime.datetime.now()) 
+    frame_key_desc = frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).cache()
+    print("time3 ", datetime.datetime.now()) 
+    df_frame_key_desc = frame_key_desc.toDF(["img", "keyp", "desc"])
+    print("time4 ", datetime.datetime.now()) 
 
-    # matcher = createMatcher(sys.argv[3], sys.argv[2])
-    # stitched_img = stitchMultImages(matcher, frames_color, df_frame_key_desc, num_imgs, int(sys.argv[4]), float(sys.argv[5]))
+    matcher = createMatcher(sys.argv[3], sys.argv[2])
+    stitched_img = stitchMultImages(matcher, frames_color, df_frame_key_desc, num_imgs, int(sys.argv[4]), float(sys.argv[5]))
+    cv2.imwrite("output.jpg", stitched_img)
+    call(["gsutil","cp",'output.jpg', sys.argv[6]])
