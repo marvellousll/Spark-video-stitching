@@ -1,3 +1,4 @@
+from numpy import matrixlib
 import pandas
 import pyspark
 from pyspark.sql import SparkSession
@@ -44,7 +45,7 @@ def getKeypointsAndDescriptors(image, feature_extraction_method):
         descriptor = cv2.SIFT_create()
 
     (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
-    return list([image.tolist(), [(p.pt[0], p.pt[1]) for p in keypoints], descriptors.tolist()])
+    return list([[(p.pt[0], p.pt[1]) for p in keypoints], descriptors.tolist()])
 
 
 def createMatcher(matcher_method, feature_extraction_method):    
@@ -59,21 +60,30 @@ def createMatcher(matcher_method, feature_extraction_method):
     return matcher
 
 
-def matchFeatures(matcher, img_i_desc, img_j_desc, k_val, ratio):
-    matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in img_j_desc]), np.array([np.array([np.float32(y) for y in x]) for x in img_i_desc]), k=k_val)
+def matchFeatures2(desc1, desc2, k_val, ratio):
+    matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck = False)
+    matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in desc2]), np.array([np.array([np.float32(y) for y in x]) for x in desc1]), k=k_val)
     good_matches = []
     for m,n in matches:
         if m.distance < ratio*n.distance:
             good_matches.append(m)
+    return good_matches
 
+def matchFeatures(desc1, desc2, k_val, ratio):
+    matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck = False)
+    matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in desc2]), np.array([np.array([np.float32(y) for y in x]) for x in desc1]), k=k_val)
+    good_matches = []
+    for m,n in matches:
+        if m.distance < ratio*n.distance:
+            good_matches.append([m.queryIdx, m.trainIdx])
     return good_matches
 
 # isToTheLeft counts the number of matches on the left side of image 1 and the number of matches
 # on the right side of image 2. Then, it calculates the ratio of these matches to the total number
 # of matches and returns this value. 
 def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
-    src_pts = np.float32([ keypoints2[m.queryIdx] for m in matches ]).reshape(-1,1,2)
-    dst_pts = np.float32([ keypoints1[m.trainIdx] for m in matches ]).reshape(-1,1,2)
+    src_pts = np.float32([ keypoints2[m[0]] for m in matches ]).reshape(-1,1,2)
+    dst_pts = np.float32([ keypoints1[m[1]] for m in matches ]).reshape(-1,1,2)
 
     num_points_for_left = 0
     for point in src_pts:
@@ -87,35 +97,48 @@ def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
     ratio_points_for_left = num_points_for_left / (len(src_pts) + len(dst_pts))
     return ratio_points_for_left > 0.5
 
-def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, ratio):
-
+def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_matrix, k_val, ratio):
+    num_imgs = len(img_color)
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
     num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
-
-    collected = df_frame_key_desc.select("img", "keyp", "desc").toPandas() # Pandas supports more optimized conversion than mapping
-    img_gray = list(collected["img"])
-    img_keypoints = list(collected["keyp"])
-    desc = list(collected["desc"])
-    
     print("time5 ", datetime.datetime.now()) 
+
+    # METHOD 1: NON-DISTRIBUTED
+
+    # for i, desc_i in enumerate(img_descriptors):
+    #     for j, desc_j in enumerate(img_descriptors):
+    #         if i < j:
+    #             match_matrix[i][j] = matchFeatures2(desc_i, desc_j, k_val, ratio)
+    #             num_match_matrix[i][j] = len(match_matrix[i][j])
+    #             num_match_matrix[j][i] = num_match_matrix[i][j]
     
-    for i, desc_i in enumerate(desc):
-        for j, desc_j in enumerate(desc):
+    # print("time8 ", datetime.datetime.now()) 
+    # print(num_match_matrix)
+
+    # METHOD 2: DISTRIBUTED WITH INDEX
+    
+    matrix = rdd_matrix.map(lambda d : matchFeatures(img_descriptors[d[0]], img_descriptors[d[1]], k_val, ratio)).collect()
+    print("time6 ", datetime.datetime.now()) 
+
+    k = 0
+    for i in range(num_imgs):
+        for j in range(num_imgs):
             if i < j:
-                match_matrix[i][j] = matchFeatures(matcher, desc_i, desc_j, k_val, ratio)
+                match_matrix[i][j] = matrix[k]
                 num_match_matrix[i][j] = len(match_matrix[i][j])
                 num_match_matrix[j][i] = num_match_matrix[i][j]
+                k += 1
 
     print(num_match_matrix)
-    print("time6 ", datetime.datetime.now()) 
-    
+    print("time7 ", datetime.datetime.now()) 
+
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
     # An edge image will only have one image that it matches well with. So, we are assuming that 
     # the image with the second highest matches that is the lowest out of all the second highest 
     # matches for all the other images, is most likely to be an edge image. This has been tested 
     # on multiple sets of images sent in random orders. 
-     
+    
     lowest_second_max = 10000000000000000000 # arbitary large number
     edge_index = -1
     neighbors = [] # stores the index of the neighboring images (i.e. images with first and second highest number of matches)
@@ -131,7 +154,7 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
     # start with the edge image and find the next image to stitch and append it to the list. 
     # We find the image by picking one of the two neighbors that has not been added to the list previously.
     # Then move on to that image and find the next image it matches best with. Continue
-    # this till all the images have been added to the list. 
+    # this till all the images have been added to the list.     
 
     final_order = []
     neigh_index = neighbors[edge_index][0] # The edge only has one neighbor
@@ -178,13 +201,13 @@ def findHomography(order, match_matrix, img_keypoints):
         index2 = order[i+1]
 
         if (index1 < index2):
-            src_pts = np.float32([ img_keypoints[index2][m.queryIdx] for m in match_matrix[index1][index2] ]).reshape(-1,1,2)
-            dst_pts = np.float32([ img_keypoints[index1][m.trainIdx] for m in match_matrix[index1][index2] ]).reshape(-1,1,2)
+            src_pts = np.float32([ img_keypoints[index2][m[0]] for m in match_matrix[index1][index2] ]).reshape(-1,1,2)
+            dst_pts = np.float32([ img_keypoints[index1][m[1]] for m in match_matrix[index1][index2] ]).reshape(-1,1,2)
             homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
             homographies.append(homography)
         else:
-            src_pts = np.float32([ img_keypoints[index2][m.trainIdx] for m in match_matrix[index2][index1] ]).reshape(-1,1,2)
-            dst_pts = np.float32([ img_keypoints[index1][m.queryIdx] for m in match_matrix[index2][index1] ]).reshape(-1,1,2)
+            src_pts = np.float32([ img_keypoints[index2][m[1]] for m in match_matrix[index2][index1] ]).reshape(-1,1,2)
+            dst_pts = np.float32([ img_keypoints[index1][m[0]] for m in match_matrix[index2][index1] ]).reshape(-1,1,2)
             homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
             homographies.append(homography)
     return homographies
@@ -200,27 +223,41 @@ def stitchImages(order, img_color, homographies):
         stitched_img = cv2.warpPerspective(stitched_img, homographies[i], (len(next_img[0]) + len(stitched_img[0]), len(next_img)))
         stitched_img[0 : len(next_img), 0 : len(next_img[0])] = next_img
 
-    print(stitched_img)
     return stitched_img
 
 
 if __name__ == '__main__':
     sc = pyspark.SparkContext()
     spark = SparkSession(sc)
-    num_imgs = 6
+
     print("time1 ", datetime.datetime.now()) 
     frames = sc.binaryFiles(sys.argv[1])
      
+    rdd_frames_gray = frames.map(lambda img: getGrayscaleImage(img)).cache()
+    frames_gray = rdd_frames_gray.collect()
     frames_color = frames.map(lambda img: getColorImage(img)).collect()
-    frames_gray = frames.map(lambda img: getGrayscaleImage(img))
-    # each value in frame_key_desc is a list with [gray_frame, x-coordinates of keypoints, y-coordinates of keypoints, descriptors]
-    print("time2 ", datetime.datetime.now()) 
-    frame_key_desc = frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).cache()
-    print("time3 ", datetime.datetime.now()) 
-    df_frame_key_desc = frame_key_desc.toDF(["img", "keyp", "desc"])
-    print("time4 ", datetime.datetime.now()) 
 
-    matcher = createMatcher(sys.argv[3], sys.argv[2])
-    stitched_img = stitchMultImages(matcher, frames_color, df_frame_key_desc, num_imgs, int(sys.argv[4]), float(sys.argv[5]))
+    num_imgs = len(frames_color)
+    print("time2 ", datetime.datetime.now()) 
+
+    # each value in frame_key_desc is a list with [keypoints, descriptors]
+    key_desc = rdd_frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).collect()
+    img_keypoints = [x[0] for x in key_desc]
+    img_descriptors = [x[1] for x in key_desc]
+    print("time3 ", datetime.datetime.now())
+
+    # create and parallelize neighboring relations into rdd
+    # used to calculate match_matrix in stitchMultImages
+    matrix = []
+    for i, desc_i in enumerate(img_descriptors):
+        for j, desc_j in enumerate(img_descriptors):
+            if i < j:
+               matrix.append([i, j])
+
+    rdd_matrix = sc.parallelize(matrix, numSlices=len(matrix))
+    print("time4 ", datetime.datetime.now())
+
+
+    stitched_img = stitchMultImages(frames_color, frames_gray, img_keypoints, img_descriptors, rdd_matrix, int(sys.argv[4]), float(sys.argv[5]))
     cv2.imwrite("output.jpg", stitched_img)
     call(["gsutil","cp",'output.jpg', sys.argv[6]])
