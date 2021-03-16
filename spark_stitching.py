@@ -41,9 +41,39 @@ def getGrayscaleImage(image):
 
 def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
-        descriptor = cv2.SIFT_create()
+        descriptor = cv2.SIFT_create(nfeatures=500)
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
-    (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+    if feature_extraction_method == 'orb':
+        descriptor = cv2.ORB_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'fastbrief':
+        detector = cv2.FastFeatureDetector_create()
+        keypoints = detector.detect(image, None)
+        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+        _, descriptors = brief.compute(image, keypoints)
+    
+    if feature_extraction_method == 'fastbrisk':
+        detector = cv2.FastFeatureDetector_create()
+        keypoints = detector.detect(image, None)
+        br = cv2.BRISK_create()
+        _, descriptors = br.compute(image, keypoints)
+
+    if feature_extraction_method == 'starbrief':
+        detector = cv2.xfeatures2d.StarDetector_create()
+        keypoints = detector.detect(image, None)
+        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+        _, descriptors = brief.compute(image, keypoints)
+
+    if feature_extraction_method == 'brisk':
+        descriptor = cv2.BRISK_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'akaze':
+        descriptor = cv2.AKAZE_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
     return list([image.tolist(), [(p.pt[0], p.pt[1]) for p in keypoints], descriptors.tolist()])
 
 
@@ -87,7 +117,7 @@ def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
     ratio_points_for_left = num_points_for_left / (len(src_pts) + len(dst_pts))
     return ratio_points_for_left > 0.5
 
-def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, ratio):
+def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, ratio, time4):
 
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
     num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
@@ -97,8 +127,10 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
     img_keypoints = list(collected["keyp"])
     desc = list(collected["desc"])
     
-    print("time5 ", datetime.datetime.now()) 
-    
+    time5 = datetime.datetime.now()
+    print("time5 ", time5)
+    print("diff5 ", (time5 - time4).total_seconds()) 
+
     for i, desc_i in enumerate(desc):
         for j, desc_j in enumerate(desc):
             if i < j:
@@ -107,8 +139,11 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
                 num_match_matrix[j][i] = num_match_matrix[i][j]
 
     print(num_match_matrix)
-    print("time6 ", datetime.datetime.now()) 
-    
+
+    time6 = datetime.datetime.now()
+    print("time6 ", time6)
+    print("diff6 ", (time6 - time5).total_seconds()) 
+
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
     # An edge image will only have one image that it matches well with. So, we are assuming that 
@@ -158,14 +193,19 @@ def stitchMultImages(matcher, img_color, df_frame_key_desc, num_imgs, k_val, rat
     if rev_flag:
         final_order.reverse()
 
-    print(final_order)
-    print("time7 ", datetime.datetime.now()) 
+    time7 = datetime.datetime.now()
+    print("time7 ", time7)
+    print("diff7 ", (time7 - time6).total_seconds()) 
 
     homographies = findHomography(final_order, match_matrix, img_keypoints)
-    print("time8 ", datetime.datetime.now()) 
+    time8 = datetime.datetime.now()
+    print("time8 ", time8)
+    print("diff8 ", (time8 - time7).total_seconds()) 
 
     stitched_img = stitchImages(final_order, img_color, homographies)
-    print("time9 ", datetime.datetime.now()) 
+    time9 = datetime.datetime.now()
+    print("time9 ", time9)
+    print("diff9 ", (time9 - time8).total_seconds()) 
     return stitched_img
 
 # return a list of homographies
@@ -200,27 +240,34 @@ def stitchImages(order, img_color, homographies):
         stitched_img = cv2.warpPerspective(stitched_img, homographies[i], (len(next_img[0]) + len(stitched_img[0]), len(next_img)))
         stitched_img[0 : len(next_img), 0 : len(next_img[0])] = next_img
 
-    print(stitched_img)
     return stitched_img
 
 
 if __name__ == '__main__':
     sc = pyspark.SparkContext()
     spark = SparkSession(sc)
-    num_imgs = 6
-    print("time1 ", datetime.datetime.now()) 
+    num_imgs = 8
+    time1 = datetime.datetime.now()
+    print("time1 ", time1)
     frames = sc.binaryFiles(sys.argv[1])
-     
+
     frames_color = frames.map(lambda img: getColorImage(img)).collect()
     frames_gray = frames.map(lambda img: getGrayscaleImage(img))
     # each value in frame_key_desc is a list with [gray_frame, x-coordinates of keypoints, y-coordinates of keypoints, descriptors]
-    print("time2 ", datetime.datetime.now()) 
-    frame_key_desc = frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).cache()
-    print("time3 ", datetime.datetime.now()) 
+    time2 = datetime.datetime.now()
+    print("time2 ", time2) 
+    print("diff2 ", (time2 - time1).total_seconds())
+    frame_key_desc = frames_gray.map(lambda img: getKeypointsAndDescriptors(img, 'starbrief')).cache()
+    time3 = datetime.datetime.now()
+    print("time3 ", time3) 
+    print("diff3 ", (time3 - time2).total_seconds())
+
     df_frame_key_desc = frame_key_desc.toDF(["img", "keyp", "desc"])
-    print("time4 ", datetime.datetime.now()) 
+    time4 = datetime.datetime.now()
+    print("time4 ", time4)
+    print("diff4 ", (time4 - time3).total_seconds()) 
 
     matcher = createMatcher(sys.argv[3], sys.argv[2])
-    stitched_img = stitchMultImages(matcher, frames_color, df_frame_key_desc, num_imgs, int(sys.argv[4]), float(sys.argv[5]))
+    stitched_img = stitchMultImages(matcher, frames_color, df_frame_key_desc, num_imgs, int(sys.argv[4]), float(sys.argv[5]), time4)
     cv2.imwrite("output.jpg", stitched_img)
     call(["gsutil","cp",'output.jpg', sys.argv[6]])
