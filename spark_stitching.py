@@ -1,7 +1,6 @@
 from numpy import matrixlib
 import pandas
-import pyspark
-from pyspark.sql import SparkSession
+from pyspark import SparkContext, SparkConf
 from subprocess import call
 from PIL import Image
 import cv2
@@ -11,15 +10,8 @@ import sys
 import io
 import datetime
 import os
+import threading
 
-'''
-sys.argv[1] = folder in which each frame is stored as a sub-folder with 6 images
-sys.argv[2] = feature_extraction_method
-sys.argv[3] = matcher_method
-sys.argv[4] = k_val
-sys.argv[5] = ratio
-sys.argv[6] = output folder
-'''
 # def load_images_from_folder(folder):
 #     images = []
 #     for filename in os.listdir(folder):
@@ -60,15 +52,6 @@ def createMatcher(matcher_method, feature_extraction_method):
     return matcher
 
 
-def matchFeatures2(desc1, desc2, k_val, ratio):
-    matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck = False)
-    matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in desc2]), np.array([np.array([np.float32(y) for y in x]) for x in desc1]), k=k_val)
-    good_matches = []
-    for m,n in matches:
-        if m.distance < ratio*n.distance:
-            good_matches.append(m)
-    return good_matches
-
 def matchFeatures(desc1, desc2, k_val, ratio):
     matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck = False)
     matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in desc2]), np.array([np.array([np.float32(y) for y in x]) for x in desc1]), k=k_val)
@@ -101,24 +84,8 @@ def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_ma
     num_imgs = len(img_color)
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
     num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
-    print("time5 ", datetime.datetime.now()) 
 
-    # METHOD 1: NON-DISTRIBUTED
-
-    # for i, desc_i in enumerate(img_descriptors):
-    #     for j, desc_j in enumerate(img_descriptors):
-    #         if i < j:
-    #             match_matrix[i][j] = matchFeatures2(desc_i, desc_j, k_val, ratio)
-    #             num_match_matrix[i][j] = len(match_matrix[i][j])
-    #             num_match_matrix[j][i] = num_match_matrix[i][j]
-    
-    # print("time8 ", datetime.datetime.now()) 
-    # print(num_match_matrix)
-
-    # METHOD 2: DISTRIBUTED WITH INDEX
-    
     matrix = rdd_matrix.map(lambda d : matchFeatures(img_descriptors[d[0]], img_descriptors[d[1]], k_val, ratio)).collect()
-    print("time6 ", datetime.datetime.now()) 
 
     k = 0
     for i in range(num_imgs):
@@ -128,9 +95,6 @@ def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_ma
                 num_match_matrix[i][j] = len(match_matrix[i][j])
                 num_match_matrix[j][i] = num_match_matrix[i][j]
                 k += 1
-
-    print(num_match_matrix)
-    print("time7 ", datetime.datetime.now()) 
 
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
@@ -181,14 +145,9 @@ def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_ma
     if rev_flag:
         final_order.reverse()
 
-    print(final_order)
-    print("time7 ", datetime.datetime.now()) 
-
     homographies = findHomography(final_order, match_matrix, img_keypoints)
-    print("time8 ", datetime.datetime.now()) 
-
     stitched_img = stitchImages(final_order, img_color, homographies)
-    print("time9 ", datetime.datetime.now()) 
+
     return stitched_img
 
 # return a list of homographies
@@ -225,39 +184,49 @@ def stitchImages(order, img_color, homographies):
 
     return stitched_img
 
-
-if __name__ == '__main__':
-    sc = pyspark.SparkContext()
-    spark = SparkSession(sc)
-
-    print("time1 ", datetime.datetime.now()) 
-    frames = sc.binaryFiles(sys.argv[1])
+def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, ratio, output_dir):
+    print("start task " + frame_index + " " + str(datetime.datetime.now())) 
+    frames = sc.binaryFiles(input_dir + frame_index)
      
     rdd_frames_gray = frames.map(lambda img: getGrayscaleImage(img)).cache()
     frames_gray = rdd_frames_gray.collect()
     frames_color = frames.map(lambda img: getColorImage(img)).collect()
 
-    num_imgs = len(frames_color)
-    print("time2 ", datetime.datetime.now()) 
-
     # each value in frame_key_desc is a list with [keypoints, descriptors]
-    key_desc = rdd_frames_gray.map(lambda img: getKeypointsAndDescriptors(img, "sift")).collect()
+    key_desc = rdd_frames_gray.map(lambda img: getKeypointsAndDescriptors(img, feature_extraction_method)).collect()
     img_keypoints = [x[0] for x in key_desc]
     img_descriptors = [x[1] for x in key_desc]
-    print("time3 ", datetime.datetime.now())
 
     # create and parallelize neighboring relations into rdd
     # used to calculate match_matrix in stitchMultImages
     matrix = []
-    for i, desc_i in enumerate(img_descriptors):
-        for j, desc_j in enumerate(img_descriptors):
+    num_imgs = len(frames_color)
+    for i in range(num_imgs):
+        for j in range(num_imgs):
             if i < j:
                matrix.append([i, j])
 
     rdd_matrix = sc.parallelize(matrix, numSlices=len(matrix))
-    print("time4 ", datetime.datetime.now())
 
 
-    stitched_img = stitchMultImages(frames_color, frames_gray, img_keypoints, img_descriptors, rdd_matrix, int(sys.argv[4]), float(sys.argv[5]))
-    cv2.imwrite("output.jpg", stitched_img)
-    call(["gsutil","cp",'output.jpg', sys.argv[6]])
+    stitched_img = stitchMultImages(frames_color, frames_gray, img_keypoints, img_descriptors, rdd_matrix, k_val, ratio)
+    cv2.imwrite("output" + frame_index + ".jpg", stitched_img)
+    call(["gsutil","cp","output" + frame_index + ".jpg", output_dir])
+    print("end task " + frame_index + " " + str(datetime.datetime.now()))
+
+if __name__ == '__main__':
+    conf = SparkConf()
+    conf.set('spark.scheduler.mode', 'FAIR')
+    sc = SparkContext(conf=conf)
+
+    num_frames = int(sys.argv[1])
+    input_dir = sys.argv[2]
+    feature_extraction_method = sys.argv[3]
+    matcher_method = sys.argv[4]
+    k_val = int(sys.argv[5])
+    ratio = float(sys.argv[6])
+    output_dir = sys.argv[7]
+
+    for i in range(num_frames):
+        t = threading.Thread(target=stitchTask, args=(sc, str(i+1), input_dir, feature_extraction_method, k_val, ratio, output_dir))
+        t.start()
