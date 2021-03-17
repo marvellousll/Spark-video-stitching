@@ -117,7 +117,6 @@ def stitchMultImages(matcher, img_color, img_keypoints, img_descriptors, k_val, 
             num_match_matrix[j][i] = len(match_matrix[i][j])
             j = j + 1
 
-    print("time3 ", datetime.datetime.now()) 
     #print("NUM MATCH MATRIX - ", num_match_matrix)
 
     # Find the image that is most likely to be the edge. This code works on the principle that 
@@ -213,7 +212,7 @@ def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, rat
     img_color = rdd_frames.map(lambda img: getColorImage(img)).collect()
     img_gray = rdd_frames.map(lambda img: getGrayscaleImage(img)).collect()
 
-    print("time1 ", datetime.datetime.now()) 
+    # print("time1 ", datetime.datetime.now()) 
     img_keypoints = []
     img_descriptors = []
     for img_num in range(len(img_color)):
@@ -221,20 +220,18 @@ def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, rat
         img_keypoints.append(keypoints)
         img_descriptors.append(descriptors)
 
-    print("time2 ", datetime.datetime.now()) 
+    # print("time2 ", datetime.datetime.now()) 
     matcher = createMatcher(matcher_method, feature_extraction_method)
     stitched_img = stitchMultImages(matcher, img_color, img_keypoints, img_descriptors, k_val, ratio)
 
-    print("time4 ", datetime.datetime.now()) 
-    cv2.imwrite("output" + frame_index + ".jpg", stitched_img)
-    call(["gsutil","cp","output" + frame_index + ".jpg", output_dir])
+    # print("time4 ", datetime.datetime.now()) 
+    # cv2.imwrite("output" + frame_index + ".jpg", stitched_img)
+    # call(["gsutil","cp","output" + frame_index + ".jpg", output_dir])
     # print("end task " + frame_index + " " + str(datetime.datetime.now()))
 
 
 if __name__ == '__main__':
-    conf = SparkConf()
-    conf.set('spark.scheduler.mode', 'FAIR')
-    sc = SparkContext(conf=conf)
+    sc = SparkContext()
 
     num_frames = int(sys.argv[1])
     input_dir = sys.argv[2]
@@ -244,6 +241,14 @@ if __name__ == '__main__':
     ratio = float(sys.argv[6])
     output_dir = sys.argv[7]
 
+    time1 = datetime.datetime.now()
+
     # when stitching images in input/frame1, set the second argument as str(1)
-    stitchTask(sc, str(1), input_dir, feature_extraction_method, k_val, ratio, output_dir)
-    # stitchTask(sc, str(2), input_dir, feature_extraction_method, k_val, ratio, output_dir)
+    result = []
+    for i in range(num_frames):
+        result.append(stitchTask(sc, str(i + 1), input_dir, feature_extraction_method, k_val, ratio, output_dir))
+    time2 = datetime.datetime.now()
+
+
+    print("time1 ", time1)
+    print("time2 ", time2)

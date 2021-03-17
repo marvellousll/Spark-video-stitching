@@ -125,7 +125,6 @@ def stitchMultImages(img_color, img_keypoints, img_descriptors, rdd_matrix, k_va
 
     print("time3 ", datetime.datetime.now()) 
 
-
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
     # An edge image will only have one image that it matches well with. So, we are assuming that 
@@ -193,6 +192,7 @@ def stitchMultImagesWithOrdering(img_color, img_keypoints, img_descriptors, k_va
     stitched_img = stitchImages(final_order, img_color, homographies)
 
     return stitched_img
+    
 
 # return a list of homographies
 # homographies[i] is the homography from img[i+1] to img[i]
@@ -260,9 +260,10 @@ def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, rat
 def stitchWithOrderingTask(sc, frame_index, input_dir, feature_extraction_method, k_val, ratio, output_dir):
     print("start task " + frame_index + " " + str(datetime.datetime.now())) 
     rdd_frames = sc.binaryFiles(input_dir + frame_index)
-    frames_color = rdd_frames.map(lambda img: getColorImage(img)).collect()
 
+    frames_color = rdd_frames.map(lambda img: getColorImage(img)).collect()
     key_desc = rdd_frames.map(lambda img: getGrayscaleImage(img)).map(lambda img: getKeypointsAndDescriptors(img, feature_extraction_method)).collect()
+
     img_keypoints = [x[0] for x in key_desc]
     img_descriptors = [x[1] for x in key_desc]
 
@@ -286,6 +287,6 @@ if __name__ == '__main__':
     output_dir = sys.argv[7]
 
     # when stitching images in input/frame2, set the second argument as str(1)
-    stitchTask(sc, str(1), input_dir, feature_extraction_method, k_val, ratio, output_dir)
+    stitchTask(sc, str(10), input_dir, feature_extraction_method, k_val, ratio, output_dir)
     # stitchTask(sc, str(2), input_dir, feature_extraction_method, k_val, ratio, output_dir)
    
