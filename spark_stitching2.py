@@ -31,7 +31,7 @@ def getGrayscaleImage(image):
 
 def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
-        descriptor = cv2.SIFT_create(nfeatures=500)
+        descriptor = cv2.SIFT_create()
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
     if feature_extraction_method == 'orb':
@@ -64,7 +64,7 @@ def getKeypointsAndDescriptors(image, feature_extraction_method):
         descriptor = cv2.AKAZE_create()
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
-    return [[(p.pt[0], p.pt[1]) for p in keypoints], descriptors]
+    return list([[(p.pt[0], p.pt[1]) for p in keypoints], descriptors.tolist()])
 
 
 def createMatcher(matcher_method, feature_extraction_method):    
@@ -81,7 +81,7 @@ def createMatcher(matcher_method, feature_extraction_method):
 
 def matchFeatures(desc1, desc2, k_val, ratio):
     matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck = False)
-    matches = matcher.knnMatch(desc2, desc1, k=k_val)
+    matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in desc2]), np.array([np.array([np.float32(y) for y in x]) for x in desc1]), k=k_val)
     good_matches = []
     for m,n in matches:
         if m.distance < ratio*n.distance:
@@ -123,9 +123,8 @@ def stitchMultImages(img_color, img_keypoints, img_descriptors, rdd_matrix, k_va
                 num_match_matrix[j][i] = num_match_matrix[i][j]
                 k += 1
 
+    #print(num_match_matrix)
     print("time3 ", datetime.datetime.now()) 
-
-
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
     # An edge image will only have one image that it matches well with. So, we are assuming that 
@@ -285,7 +284,7 @@ if __name__ == '__main__':
     ratio = float(sys.argv[6])
     output_dir = sys.argv[7]
 
-    # when stitching images in input/frame2, set the second argument as str(1)
+    # when stitching images in input/frame1, set the second argument as str(1)
     stitchTask(sc, str(1), input_dir, feature_extraction_method, k_val, ratio, output_dir)
     # stitchTask(sc, str(2), input_dir, feature_extraction_method, k_val, ratio, output_dir)
    

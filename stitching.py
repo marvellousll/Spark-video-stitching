@@ -1,57 +1,62 @@
 import cv2
 import numpy as np
 import argparse
+from pyspark import SparkContext, SparkConf
+import sys
+import datetime
+from subprocess import call
+from PIL import Image
+import io
 
-def getGrayscaleImage(path):
-    return cv2.imread(path, cv2.IMREAD_GRAYSCALE)
 
-def getColorImage(path):
-    return cv2.imread(path)
+def getColorImage(image):
+    name, img = image
+    image_img = Image.open(io.BytesIO(img))
+    np_img = cv2.cvtColor(np.asarray(image_img),cv2.COLOR_RGB2BGR) 
+    return np_img
+
+def getGrayscaleImage(image):
+    name, img = image
+    image_img = Image.open(io.BytesIO(img)).convert('L')
+    np_img = np.array(image_img)
+    return np_img
 
 def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
-        print("Using SIFT")
-        descriptor = cv2.SIFT_create()
+        descriptor = cv2.SIFT_create(nfeatures=500)
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
     if feature_extraction_method == 'orb':
-        print("Using ORB")
         descriptor = cv2.ORB_create()
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
     if feature_extraction_method == 'fastbrief':
-        print("Using FAST_BRIEF")
         detector = cv2.FastFeatureDetector_create()
         keypoints = detector.detect(image, None)
         brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
         _, descriptors = brief.compute(image, keypoints)
     
     if feature_extraction_method == 'fastbrisk':
-        print("Using FAST_BRISK")
         detector = cv2.FastFeatureDetector_create()
         keypoints = detector.detect(image, None)
         br = cv2.BRISK_create()
         _, descriptors = br.compute(image, keypoints)
 
     if feature_extraction_method == 'starbrief':
-        print("Using STAR_BRIEF")
         detector = cv2.xfeatures2d.StarDetector_create()
         keypoints = detector.detect(image, None)
         brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
         _, descriptors = brief.compute(image, keypoints)
 
     if feature_extraction_method == 'brisk':
-        print("Using BRISK")
         descriptor = cv2.BRISK_create()
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
     if feature_extraction_method == 'akaze':
-        print("Using AKAZE")
         descriptor = cv2.AKAZE_create()
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
     if feature_extraction_method == 'kaze':
-        print("Using KAZE")
         descriptor = cv2.KAZE_create()
         (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
@@ -69,8 +74,9 @@ def createMatcher(matcher_method, feature_extraction_method):
 
     return matcher
 
-def matchFeatures(matcher, img1, img2, keypoints1, descriptors1, keypoints2, descriptors2, k_val, ratio):
-    matches = matcher.knnMatch(descriptors2, descriptors1, k=k_val)
+def matchFeatures(matcher, desc1, desc2, k_val, ratio):
+    matches = matcher.knnMatch(np.array([np.array([np.float32(y) for y in x]) for x in desc2]), np.array([np.array([np.float32(y) for y in x]) for x in desc1]), k=k_val)
+
     good_matches = []
     for m,n in matches:
         if m.distance < ratio*n.distance:
@@ -98,34 +104,21 @@ def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
     return ratio_points_for_left > 0.5
 
 
-def stitchTwoImages(matches, keypoints1, keypoints2, img1, img2):
-    src_pts = np.float32([ keypoints2[m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
-    dst_pts = np.float32([ keypoints1[m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-    homography,_ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
-
-    stitched_img = cv2.warpPerspective(img2, homography, ((img1.shape[1] + img2.shape[1]), img1.shape[0])) 
-    stitched_img[0 : img1.shape[0], 0 : img1.shape[1]] = img1 
-    cv2.imwrite('stitched.jpg', stitched_img)
-    cv2.imshow("Result", stitched_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    return stitched_img
-
-
-def stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio):
-    num_imgs = len(img_gray)
+def stitchMultImages(matcher, img_color, img_keypoints, img_descriptors, k_val, ratio):
+    num_imgs = len(img_color)
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
     num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
     for i in range(num_imgs):
         j = i + 1
         while j < num_imgs:
             # get matches for img i and img j
-            match_matrix[i][j] = matchFeatures(matcher, img_gray[i], img_gray[j], img_keypoints[i], img_descriptors[i], img_keypoints[j], img_descriptors[j], k_val, ratio)
+            match_matrix[i][j] = matchFeatures(matcher, img_descriptors[i], img_descriptors[j], k_val, ratio)
             num_match_matrix[i][j] = len(match_matrix[i][j])
             num_match_matrix[j][i] = len(match_matrix[i][j])
             j = j + 1
 
-    print("NUM MATCH MATRIX - ", num_match_matrix)
+    print("time3 ", datetime.datetime.now()) 
+    #print("NUM MATCH MATRIX - ", num_match_matrix)
 
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
@@ -170,15 +163,15 @@ def stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptor
     # and reverse the ordering if needed
     rev_flag = False
     if edge_index < neigh_index:
-        rev_flag = isToTheLeft(match_matrix[edge_index][neigh_index], img_keypoints[edge_index], img_keypoints[neigh_index], img_gray[edge_index].shape[1], img_gray[neigh_index].shape[1])
+        rev_flag = isToTheLeft(match_matrix[edge_index][neigh_index], img_keypoints[edge_index], img_keypoints[neigh_index], img_color[edge_index].shape[1], img_color[neigh_index].shape[1])
     else:
-        rev_flag = not isToTheLeft(match_matrix[neigh_index][edge_index], img_keypoints[neigh_index], img_keypoints[edge_index], img_gray[neigh_index].shape[1], img_gray[edge_index].shape[1])
+        rev_flag = not isToTheLeft(match_matrix[neigh_index][edge_index], img_keypoints[neigh_index], img_keypoints[edge_index], img_color[neigh_index].shape[1], img_color[edge_index].shape[1])
     if rev_flag:
         final_order.reverse()
 
-    print(final_order)
+    #print("final order ", final_order)
     homographies = findHomography(final_order, match_matrix, img_keypoints)
-    stitchImages(final_order, img_color, homographies)
+    return stitchImages(final_order, img_color, homographies)
 
 # return a list of homographies
 # homographies[i] is the homography from img[i+1] to img[i]
@@ -212,51 +205,45 @@ def stitchImages(order, img_color, homographies):
         stitched_img = cv2.warpPerspective(stitched_img, homographies[i], (next_img.shape[1] + stitched_img.shape[1], next_img.shape[0]))
         stitched_img[0 : next_img.shape[0], 0 : next_img.shape[1]] = next_img
 
-    cv2.imwrite('stitched.jpg', stitched_img)
+    return stitched_img
 
-def main(path1, path2, path3, path4, path5, path6, path7, path8, feature_extraction_method, matcher_method, k_val, ratio):
-    path_list = [path1, path2, path3, path4, path5, path6, path7, path8]
-    img_color = []
-    img_gray = []
+def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, ratio, output_dir):
+    # print("start task " + frame_index + " " + str(datetime.datetime.now())) 
+    rdd_frames = sc.binaryFiles(input_dir + frame_index)
+    img_color = rdd_frames.map(lambda img: getColorImage(img)).collect()
+    img_gray = rdd_frames.map(lambda img: getGrayscaleImage(img)).collect()
+
+    print("time1 ", datetime.datetime.now()) 
     img_keypoints = []
     img_descriptors = []
-    for img_num, path in enumerate(path_list):
-        img_color.append(getColorImage(path))
-        img_gray.append(getGrayscaleImage(path))
+    for img_num in range(len(img_color)):
         (keypoints, descriptors) = getKeypointsAndDescriptors(img_gray[img_num], feature_extraction_method)
         img_keypoints.append(keypoints)
         img_descriptors.append(descriptors)
 
+    print("time2 ", datetime.datetime.now()) 
     matcher = createMatcher(matcher_method, feature_extraction_method)
-    stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio)
+    stitched_img = stitchMultImages(matcher, img_color, img_keypoints, img_descriptors, k_val, ratio)
+
+    print("time4 ", datetime.datetime.now()) 
+    cv2.imwrite("output" + frame_index + ".jpg", stitched_img)
+    call(["gsutil","cp","output" + frame_index + ".jpg", output_dir])
+    # print("end task " + frame_index + " " + str(datetime.datetime.now()))
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Stitch Two Images Together')
-    parser.add_argument('--image1', required=True,
-                        help='the path to image 1')
-    parser.add_argument('--image2', required=True,
-                        help='the path to image 2')
-    parser.add_argument('--image3', required=True,
-                        help='the path to image 3')
-    parser.add_argument('--image4', required=True,
-                        help='the path to image 4')   
-    parser.add_argument('--image5', required=True,
-                        help='the path to image 5')
-    parser.add_argument('--image6', required=True,
-                        help='the path to image 6') 
-    parser.add_argument('--image7', required=True,
-                        help='the path to image 7') 
-    parser.add_argument('--image8', required=True,
-                        help='the path to image 8')                  
-    parser.add_argument('--fmethod', required=True,
-                        help='feature extraction method')
-    parser.add_argument('--mmethod', required=True,
-                        help='matcher method')
-    parser.add_argument('--k', required=True,
-                        help='k value for matcher')
-    parser.add_argument('--ratio', required=True,
-                        help='ratio for good match distance')
-    args = parser.parse_args()
-    main(path1=args.image1, path2=args.image2, path3=args.image3, path4=args.image4, path5=args.image5, path6=args.image6, path7=args.image7, path8=args.image8, feature_extraction_method=args.fmethod, matcher_method=args.mmethod, k_val=int(args.k), ratio=float(args.ratio))
+    conf = SparkConf()
+    conf.set('spark.scheduler.mode', 'FAIR')
+    sc = SparkContext(conf=conf)
 
+    num_frames = int(sys.argv[1])
+    input_dir = sys.argv[2]
+    feature_extraction_method = sys.argv[3]
+    matcher_method = sys.argv[4]
+    k_val = int(sys.argv[5])
+    ratio = float(sys.argv[6])
+    output_dir = sys.argv[7]
 
+    # when stitching images in input/frame1, set the second argument as str(1)
+    stitchTask(sc, str(1), input_dir, feature_extraction_method, k_val, ratio, output_dir)
+    # stitchTask(sc, str(2), input_dir, feature_extraction_method, k_val, ratio, output_dir)
