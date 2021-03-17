@@ -34,9 +34,39 @@ def getGrayscaleImage(image):
 
 def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
-        descriptor = cv2.SIFT_create()
+        descriptor = cv2.SIFT_create(nfeatures=500)
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
 
-    (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+    if feature_extraction_method == 'orb':
+        descriptor = cv2.ORB_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'fastbrief':
+        detector = cv2.FastFeatureDetector_create()
+        keypoints = detector.detect(image, None)
+        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+        _, descriptors = brief.compute(image, keypoints)
+    
+    if feature_extraction_method == 'fastbrisk':
+        detector = cv2.FastFeatureDetector_create()
+        keypoints = detector.detect(image, None)
+        br = cv2.BRISK_create()
+        _, descriptors = br.compute(image, keypoints)
+
+    if feature_extraction_method == 'starbrief':
+        detector = cv2.xfeatures2d.StarDetector_create()
+        keypoints = detector.detect(image, None)
+        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+        _, descriptors = brief.compute(image, keypoints)
+
+    if feature_extraction_method == 'brisk':
+        descriptor = cv2.BRISK_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'akaze':
+        descriptor = cv2.AKAZE_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
     return list([[(p.pt[0], p.pt[1]) for p in keypoints], descriptors.tolist()])
 
 

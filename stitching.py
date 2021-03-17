@@ -10,10 +10,53 @@ def getColorImage(path):
 
 def getKeypointsAndDescriptors(image, feature_extraction_method):
     if feature_extraction_method == 'sift':
+        print("Using SIFT")
         descriptor = cv2.SIFT_create()
-    #TODO: Implement SURF, ORB, etc.
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'orb':
+        print("Using ORB")
+        descriptor = cv2.ORB_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'fastbrief':
+        print("Using FAST_BRIEF")
+        detector = cv2.FastFeatureDetector_create()
+        keypoints = detector.detect(image, None)
+        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+        _, descriptors = brief.compute(image, keypoints)
     
-    return descriptor.detectAndCompute(image, None)
+    if feature_extraction_method == 'fastbrisk':
+        print("Using FAST_BRISK")
+        detector = cv2.FastFeatureDetector_create()
+        keypoints = detector.detect(image, None)
+        br = cv2.BRISK_create()
+        _, descriptors = br.compute(image, keypoints)
+
+    if feature_extraction_method == 'starbrief':
+        print("Using STAR_BRIEF")
+        detector = cv2.xfeatures2d.StarDetector_create()
+        keypoints = detector.detect(image, None)
+        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
+        _, descriptors = brief.compute(image, keypoints)
+
+    if feature_extraction_method == 'brisk':
+        print("Using BRISK")
+        descriptor = cv2.BRISK_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'akaze':
+        print("Using AKAZE")
+        descriptor = cv2.AKAZE_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    if feature_extraction_method == 'kaze':
+        print("Using KAZE")
+        descriptor = cv2.KAZE_create()
+        (keypoints, descriptors) = descriptor.detectAndCompute(image, None)
+
+    
+    return (keypoints, descriptors)
 
 def createMatcher(matcher_method, feature_extraction_method):    
     if matcher_method == "flann":
@@ -81,6 +124,8 @@ def stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptor
             num_match_matrix[i][j] = len(match_matrix[i][j])
             num_match_matrix[j][i] = len(match_matrix[i][j])
             j = j + 1
+
+    print("NUM MATCH MATRIX - ", num_match_matrix)
 
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
@@ -169,8 +214,8 @@ def stitchImages(order, img_color, homographies):
 
     cv2.imwrite('stitched.jpg', stitched_img)
 
-def main(path1, path2, path3, path4, path5, path6, feature_extraction_method, matcher_method, k_val, ratio):
-    path_list = [path1, path2, path3, path4, path5, path6]
+def main(path1, path2, path3, path4, path5, path6, path7, path8, feature_extraction_method, matcher_method, k_val, ratio):
+    path_list = [path1, path2, path3, path4, path5, path6, path7, path8]
     img_color = []
     img_gray = []
     img_keypoints = []
@@ -183,19 +228,7 @@ def main(path1, path2, path3, path4, path5, path6, feature_extraction_method, ma
         img_descriptors.append(descriptors)
 
     matcher = createMatcher(matcher_method, feature_extraction_method)
-    #stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio)
-
-    print(img_keypoints[0][0].pt)
-
-    # img_color = []
-    # img_color.append(getColorImage(path3))
-    # img_color.append(getColorImage(path2))
-    # img_color.append(getColorImage(path1))
-    # img_color.append(getColorImage(path4))
-    # stitcher = cv2.Stitcher_create()
-    # (status, stitched) = stitcher.stitch(img_color)
-    # print(status)
-    # cv2.imwrite('stitched1.jpg', stitched)
+    stitchMultImages(matcher, img_color, img_gray, img_keypoints, img_descriptors, k_val, ratio)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Stitch Two Images Together')
@@ -210,7 +243,11 @@ if __name__ == '__main__':
     parser.add_argument('--image5', required=True,
                         help='the path to image 5')
     parser.add_argument('--image6', required=True,
-                        help='the path to image 6')                  
+                        help='the path to image 6') 
+    parser.add_argument('--image7', required=True,
+                        help='the path to image 7') 
+    parser.add_argument('--image8', required=True,
+                        help='the path to image 8')                  
     parser.add_argument('--fmethod', required=True,
                         help='feature extraction method')
     parser.add_argument('--mmethod', required=True,
@@ -220,6 +257,6 @@ if __name__ == '__main__':
     parser.add_argument('--ratio', required=True,
                         help='ratio for good match distance')
     args = parser.parse_args()
-    main(path1=args.image1, path2=args.image2, path3=args.image3, path4=args.image4, path5=args.image5, path6=args.image6, feature_extraction_method=args.fmethod, matcher_method=args.mmethod, k_val=int(args.k), ratio=float(args.ratio))
+    main(path1=args.image1, path2=args.image2, path3=args.image3, path4=args.image4, path5=args.image5, path6=args.image6, path7=args.image7, path8=args.image8, feature_extraction_method=args.fmethod, matcher_method=args.mmethod, k_val=int(args.k), ratio=float(args.ratio))
 
 
