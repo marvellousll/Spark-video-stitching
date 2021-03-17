@@ -80,7 +80,7 @@ def isToTheLeft(matches, keypoints1, keypoints2, img1width, img2width):
     ratio_points_for_left = num_points_for_left / (len(src_pts) + len(dst_pts))
     return ratio_points_for_left > 0.5
 
-def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_matrix, k_val, ratio):
+def stitchMultImages(img_color, img_keypoints, img_descriptors, rdd_matrix, k_val, ratio):
     num_imgs = len(img_color)
     match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
     num_match_matrix = [[0 for i in range(num_imgs)] for j in range(num_imgs)] #stores number of matches for each pair of images
@@ -96,6 +96,7 @@ def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_ma
                 num_match_matrix[j][i] = num_match_matrix[i][j]
                 k += 1
 
+    print(num_match_matrix)
     # Find the image that is most likely to be the edge. This code works on the principle that 
     # each non-edge image will have two other images with which it will have the most matches.
     # An edge image will only have one image that it matches well with. So, we are assuming that 
@@ -139,12 +140,26 @@ def stitchMultImages(img_color, img_gray, img_keypoints, img_descriptors, rdd_ma
     # and reverse the ordering if needed
     rev_flag = False
     if edge_index < neigh_index:
-        rev_flag = isToTheLeft(match_matrix[edge_index][neigh_index], img_keypoints[edge_index], img_keypoints[neigh_index], len(img_gray[edge_index][0]), len(img_gray[neigh_index][0]))
+        rev_flag = isToTheLeft(match_matrix[edge_index][neigh_index], img_keypoints[edge_index], img_keypoints[neigh_index], len(img_color[edge_index][0]), len(img_color[neigh_index][0]))
     else:
-        rev_flag = not isToTheLeft(match_matrix[neigh_index][edge_index], img_keypoints[neigh_index], img_keypoints[edge_index], len(img_gray[neigh_index][0]), len(img_gray[edge_index][0]))
+        rev_flag = not isToTheLeft(match_matrix[neigh_index][edge_index], img_keypoints[neigh_index], img_keypoints[edge_index], len(img_color[neigh_index][0]), len(img_color[edge_index][0]))
     if rev_flag:
         final_order.reverse()
 
+    print(final_order)
+    homographies = findHomography(final_order, match_matrix, img_keypoints)
+    stitched_img = stitchImages(final_order, img_color, homographies)
+
+    return stitched_img
+
+def stitchMultImagesWithOrdering(img_color, img_keypoints, img_descriptors, k_val, ratio):
+    num_imgs = len(img_color)
+    match_matrix = [[[] for i in range(num_imgs)] for j in range(num_imgs)] #stores matches for each pair of images
+
+    final_order = range(num_imgs)    
+    for i in range(num_imgs - 1):
+        match_matrix[i][i+1] = matchFeatures(img_descriptors[i], img_descriptors[i+1], k_val, ratio)
+    
     homographies = findHomography(final_order, match_matrix, img_keypoints)
     stitched_img = stitchImages(final_order, img_color, homographies)
 
@@ -186,14 +201,10 @@ def stitchImages(order, img_color, homographies):
 
 def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, ratio, output_dir):
     print("start task " + frame_index + " " + str(datetime.datetime.now())) 
-    frames = sc.binaryFiles(input_dir + frame_index)
-     
-    rdd_frames_gray = frames.map(lambda img: getGrayscaleImage(img)).cache()
-    frames_gray = rdd_frames_gray.collect()
-    frames_color = frames.map(lambda img: getColorImage(img)).collect()
+    rdd_frames = sc.binaryFiles(input_dir + frame_index)
+    frames_color = rdd_frames.map(lambda img: getColorImage(img)).collect()
 
-    # each value in frame_key_desc is a list with [keypoints, descriptors]
-    key_desc = rdd_frames_gray.map(lambda img: getKeypointsAndDescriptors(img, feature_extraction_method)).collect()
+    key_desc = rdd_frames.map(lambda img: getGrayscaleImage(img)).map(lambda img: getKeypointsAndDescriptors(img, feature_extraction_method)).collect()
     img_keypoints = [x[0] for x in key_desc]
     img_descriptors = [x[1] for x in key_desc]
 
@@ -208,8 +219,21 @@ def stitchTask(sc, frame_index, input_dir, feature_extraction_method, k_val, rat
 
     rdd_matrix = sc.parallelize(matrix, numSlices=len(matrix))
 
+    stitched_img = stitchMultImages(frames_color, img_keypoints, img_descriptors, rdd_matrix, k_val, ratio)
+    cv2.imwrite("output" + frame_index + ".jpg", stitched_img)
+    call(["gsutil","cp","output" + frame_index + ".jpg", output_dir])
+    print("end task " + frame_index + " " + str(datetime.datetime.now()))
 
-    stitched_img = stitchMultImages(frames_color, frames_gray, img_keypoints, img_descriptors, rdd_matrix, k_val, ratio)
+def stitchWithoutOrderingTask(sc, frame_index, input_dir, feature_extraction_method, k_val, ratio, output_dir):
+    print("start task " + frame_index + " " + str(datetime.datetime.now())) 
+    rdd_frames = sc.binaryFiles(input_dir + frame_index)
+    frames_color = rdd_frames.map(lambda img: getColorImage(img)).collect()
+
+    key_desc = rdd_frames.map(lambda img: getGrayscaleImage(img)).map(lambda img: getKeypointsAndDescriptors(img, feature_extraction_method)).collect()
+    img_keypoints = [x[0] for x in key_desc]
+    img_descriptors = [x[1] for x in key_desc]
+
+    stitched_img = stitchMultImagesWithOrdering(frames_color, img_keypoints, img_descriptors, k_val, ratio)
     cv2.imwrite("output" + frame_index + ".jpg", stitched_img)
     call(["gsutil","cp","output" + frame_index + ".jpg", output_dir])
     print("end task " + frame_index + " " + str(datetime.datetime.now()))
@@ -227,6 +251,7 @@ if __name__ == '__main__':
     ratio = float(sys.argv[6])
     output_dir = sys.argv[7]
 
-    for i in range(num_frames):
-        t = threading.Thread(target=stitchTask, args=(sc, str(i+1), input_dir, feature_extraction_method, k_val, ratio, output_dir))
-        t.start()
+    # when stitching images in input/frame1, set the second argument as str(1)
+    stitchWithoutOrderingTask(sc, str(8), input_dir, feature_extraction_method, k_val, ratio, output_dir)
+    # stitchTask(sc, str(2), input_dir, feature_extraction_method, k_val, ratio, output_dir)
+   
