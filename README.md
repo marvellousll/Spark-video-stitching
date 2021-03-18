@@ -1,25 +1,27 @@
-The arguments for stitching.py are as follows:
+## Frame Extraction
 
-1. --image1 = path to image 1
-2. --image2 = path to image 2
-3. --image1 = path to image 3
-4. --image2 = path to image 4
-5. --image1 = path to image 5
-6. --image2 = path to image 6
-7. --fmethod = feature extraction method
-8. --mmethod = feature matching method
-9. --k = value of k for kNN matcher
-10. --ratio = ratio to tune which matches should be considered 'good'
+## Frame Stitching
+Suppose we want to stitch N videos each having T frames. We implemented three different programs to run on GCP dataproc:
+1. `stitching.py` performs video stitching on a single server
+2. `spark_stitching_n.py` performs distributive video stitching on spark using "distribute-over-N" method. In each Spark job, we stitch N frames distributively (by extrating 1 frame from each video). Then, run T of those jobs sequentially. This method is relatively inefficient.
+3. `spark_stitching_t.py` performs distributive video stitching on spark using "distribute-over-T" method. We have a single Spark job that processes T stitching jobs distributively, where each stitching job (of N frames) is done in a single server approach.
 
-sample command to run:
+The arguments of the programs are:
+1. Number of frames that each frame contains (T)
+2. Input directory. We assume that the input directory contains T sub-directories (frame1 ... frameT), and each sub-directory contains N frames (img1 ... imgN).
+3. Feature extraction method. Suggested method is "sift"
+4. Matcher method. Currently we only supports "bruteforce".
+5. k_val
+6. ratio
+7. Output directory
 
-python3 stitching.py --image1 ./img6.png --image2 ./img2.png --image3 ./img5.png --image4 ./img1.png --image5 ./img4.png --image6 ./img3.png --fmethod sift --mmethod bruteforce --k 2 --ratio 0.75
+Sample command to run:
+```
+gcloud dataproc jobs submit pyspark stitching2.py --cluster=cluster-af17 --region=us-east1 -- 180 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testInput/frame sift bruteforce 2 0.75 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testOutput
+```
 
-TODO:
-1. Stitch multiple images together
-2. Compare SIFT, ORB and SURF for speed and accuracy (SURF with Upright flag is supposed to have a good result)
-3. Compare BruteForce and Flann as Feature Matching algorithms in a Spark environment (fine tune Flann Matcher to improve efficiency without losing too much accuracy)
-4. Compare using ratio testing vs crossCheck for BruteForce Matcher (no crossCheck for Flann) 
-5. Use laplacian bending or other such methods to remove seam from stitched image (in general improve the final result)
+The command above will read the 180 directories testInput/frame1 ... testInput/frame180. It will produce 180 stitched images testOutput/output1.jpg ... testOutput/output180.jpg
 
-Note: Using opencv-python version 4.5.1
+
+
+

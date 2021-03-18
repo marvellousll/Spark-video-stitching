@@ -250,9 +250,9 @@ if __name__ == '__main__':
     result = rdd_frames.map(lambda imgs: stitchTask(imgs, feature_extraction_method, k_val, ratio)).collect()
     time3 = datetime.datetime.now()
 
-    # for i, img in enumerate(result):
-    #     cv2.imwrite("output" + str(i + 1) + ".jpg", img)
-    #     call(["gsutil","cp","output" + str(i + 1) + ".jpg", output_dir])
+    for i, img in enumerate(result):
+        cv2.imwrite("output" + str(i + 1) + ".jpg", img)
+        call(["gsutil","cp","output" + str(i + 1) + ".jpg", output_dir])
     
     time4 = datetime.datetime.now()
     print("time1 ", time1)
