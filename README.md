@@ -1,8 +1,10 @@
 ## Frame Extraction
 1. `v2f.py` turns video into a set of frames, with a default rate of 2fps. <br />
-    To run: python3 v2f.py arg1 arg2 arg3, where arg1 is the path of the source video, arg2 is path for the frames to be stored, and arg3 is the name of the frames
+    To run: ```$python v2f.py arg1 arg2 arg3``` <br />
+    where arg1 is the path of the source video, arg2 is path for the frames to be stored, and arg3 is the name of the frames
 2. `f2v.py` turns a set of frames back to a video, with a default rate of 2fps. <br />
-    To run: python3 f2v.py arg1 arg2, where arg1 is path to the set of frames and arg2 is the path for the generated video
+    To run: ```$python f2v.py arg1 arg2``` <br />
+    where arg1 is path to the set of frames and arg2 is the path for the generated video
 3. `crop.ipynb` crops a ultra-wide video into 8 sub-videos and turn each of them into a set of frames. <br />
     To run: just upload the video and run each cell
 
