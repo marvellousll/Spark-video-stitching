@@ -17,7 +17,11 @@ The arguments of the programs are:
 
 Sample command to run:
 ```
-gcloud dataproc jobs submit pyspark stitching2.py --cluster=cluster-af17 --region=us-east1 -- 180 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testInput/frame sift bruteforce 2 0.75 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testOutput
+gcloud dataproc jobs submit pyspark stitching2.py \
+--cluster=cluster-af17 \
+--region=us-east1 \
+-- 180 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testInput/frame \
+sift bruteforce 2 0.75 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testOutput
 ```
 
 The command above will read the 180 directories testInput/frame1 ... testInput/frame180. It will produce 180 stitched images testOutput/output1.jpg ... testOutput/output180.jpg
