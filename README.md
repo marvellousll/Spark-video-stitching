@@ -1,15 +1,39 @@
-# CS219-W21-Spark
-Here is the repo for CS219 Winter 2021. **Please open a new branch for your team first and develop on it later.** You can find some related materials here: https://docs.google.com/document/d/1rNzr85FbqccfVWHc-urn5GvvPYqEfFTtRjqnQr1DJlM/edit?usp=sharing. 
+## Frame Extraction
+1. `v2f.py` turns video into a set of frames, with a default rate of 2fps. <br />
+    To run: ```$python v2f.py arg1 arg2 arg3``` <br />
+    where arg1 is the path of the source video, arg2 is path for the frames to be stored, and arg3 is the name of the frames
+2. `f2v.py` turns a set of frames back to a video, with a default rate of 2fps. <br />
+    To run: ```$python f2v.py arg1 arg2``` <br />
+    where arg1 is path to the set of frames and arg2 is the path for the generated video
+3. `crop.ipynb` crops a ultra-wide video into 8 sub-videos and turn each of them into a set of frames. <br />
+    To run: just upload the video and run each cell
+
+## Frame Stitching
+Suppose we want to stitch N videos each having T frames. We implemented three different programs to run on GCP dataproc:
+1. `stitching.py` performs video stitching on a single server
+2. `spark_stitching_n.py` performs distributive video stitching on spark using "distribute-over-N" method. In each Spark job, we stitch N frames distributively (by extrating 1 frame from each video). Then, run T of those jobs sequentially. This method is relatively inefficient.
+3. `spark_stitching_t.py` performs distributive video stitching on spark using "distribute-over-T" method. We have a single Spark job that processes T stitching jobs distributively, where each stitching job (of N frames) is done in a single server approach.
+
+The arguments of the programs are:
+1. Number of frames that each frame contains (T)
+2. Input directory. We assume that the input directory contains T sub-directories (frame1 ... frameT), and each sub-directory contains N frames (img1 ... imgN).
+3. Feature extraction method. Suggested method is "sift"
+4. Matcher method. Currently we only supports "bruteforce".
+5. k_val
+6. ratio
+7. Output directory
+
+Sample command to run:
+```
+gcloud dataproc jobs submit pyspark stitching2.py \
+--cluster=cluster-af17 \
+--region=us-east1 \
+-- 180 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testInput/frame \
+sift bruteforce 2 0.75 gs://dataproc-staging-us-west4-399405748907-aq6u7ejv/testOutput
+```
+
+The command above will read the 180 directories testInput/frame1 ... testInput/frame180. It will produce 180 stitched images testOutput/output1.jpg ... testOutput/output180.jpg
 
 
-## Topic 1: Cloud Anchor Extraction with Spark
-To enable the collaborations between multiple users’ views for AR applications, feature points need to be extracted from objects in each camera stream. If users share some common objects in the views, these objects can be the anchor to establish the connection between real-world positions. However, extracting the feature points with current algorithms like SIFT is computation-intensive. This project explores the server cluster to speed up the processing with Spark, including: 
-- Decoupling the procedures in the feature extraction to build the distributive processing with Spark
-- Combining the feature extraction algorithm like SIFT with ML models like Yolo to improve the accuracy
-- Comparing the performance between the single-server solution and the distributed solution
 
-## Topic 3: Distributed OpenPose with Spark 
-OpenPose provides video analytics for body, foot, face, and hands estimations. Due to the processing overhead, performing the human skeleton analytics with OpenPose on large-scale videos is still challenging. The server cluster in the cloud provides new opportunities and source videos can be split into frames, which can be processed distributively. This project explores to leverage the server cluster to speed up the OpenPose processing with Spark, including: 
-- Develop the distributed processing system with Spark for video analytics so that the video frames can be split into several server nodes for further processing
-- Comparing the OpenPose performance between the single-server solution and the distributed solution
-reference: https://github.com/CMU-Perceptual-Computing-Lab/openpose 
+
